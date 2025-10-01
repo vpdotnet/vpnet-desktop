@@ -723,7 +723,7 @@ void IpTablesFirewall::replaceAnchor(TableEnum tableType, IPVersion ip, const st
 }
 
 IpTablesFirewall::Impl::Impl(const kapps::net::FirewallConfig &config)
-: _anchorBase{config.brandInfo.code + "vpn"}
+: _anchorBase{config.brandInfo.code}
 , _hnsdGroupName{config.brandInfo.code + "hnsd"}
 , _cgroup{config}
 , _filterTable{_anchorBase}

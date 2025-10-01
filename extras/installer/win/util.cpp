@@ -581,36 +581,76 @@ int runProgram(utf16ptr executable, const std::initializer_list<utf16ptr> args, 
 
 bool launchProgramAsDesktopUser(utf16ptr executable, const std::initializer_list<utf16ptr> args, utf16ptr cwd)
 {
-    std::wstring cmdline;
-    appendQuotedArgument(cmdline, executable);
-    for (const auto& arg : args)
-        appendQuotedArgument(cmdline, arg);
+    bool result = false;
 
-    // Use ShellExecuteEx instead of token manipulation - safer and less suspicious
-    SHELLEXECUTEINFOW sei = {0};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
-    sei.lpVerb = L"open";
-    sei.lpFile = executable;
-    
-    // Convert args to parameters string (all args are parameters for ShellExecute)
-    std::wstring parameters;
-    for (const auto& arg : args)
+    // First try the original method: Launch the process unelevated by copying the token of the shell (desktop) window
+    if (HWND shellWnd = GetShellWindow())
     {
-        if (!parameters.empty())
-            parameters += L" ";
-        appendQuotedArgument(parameters, arg);
-    }
+        DWORD shellPID;
+        DWORD shellTID = GetWindowThreadProcessId(shellWnd, &shellPID);
+        if (HANDLE shellProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, shellPID))
+        {
+            HANDLE shellToken;
+            if (OpenProcessToken(shellProcess, TOKEN_DUPLICATE, &shellToken))
+            { 
+                HANDLE primaryToken;
+                if (DuplicateTokenEx(shellToken, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID, NULL, SecurityImpersonation, TokenPrimary, &primaryToken))
+                {
+                    std::wstring cmdline;
+                    appendQuotedArgument(cmdline, executable);
+                    for (const auto& arg : args)
+                        appendQuotedArgument(cmdline, arg);
     
-    if (!parameters.empty())
-        sei.lpParameters = parameters.c_str();
-    
-    if (cwd)
-        sei.lpDirectory = cwd;
-    
-    sei.nShow = SW_NORMAL;
+                    PROCESS_INFORMATION pi = {0};
+                    STARTUPINFO si = {0};
+                    si.cb = sizeof(si);
 
-    return ShellExecuteExW(&sei) != FALSE;
+                    if (CreateProcessWithTokenW(primaryToken, 0, NULL, &cmdline[0], 0, NULL, cwd, &si, &pi))
+                    {
+                        CloseHandle(pi.hProcess);
+                        CloseHandle(pi.hThread);
+                        result = true;
+                    }
+
+                    CloseHandle(primaryToken);
+                }
+                CloseHandle(shellToken);
+            }
+            CloseHandle(shellProcess);
+        }
+    }
+
+    // If the token method failed, fall back to ShellExecute with "runas" verb and NORMAL_PRIORITY_CLASS
+    // This should prevent elevation inheritance in most cases
+    if (!result)
+    {
+        SHELLEXECUTEINFOW sei = {0};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | SEE_MASK_NO_CONSOLE;
+        sei.lpVerb = nullptr; // Use default verb (open) instead of "runas"
+        sei.lpFile = executable;
+        
+        // Build parameters string
+        std::wstring parameters;
+        for (const auto& arg : args)
+        {
+            if (!parameters.empty())
+                parameters += L" ";
+            appendQuotedArgument(parameters, arg);
+        }
+        
+        if (!parameters.empty())
+            sei.lpParameters = parameters.c_str();
+        
+        if (cwd)
+            sei.lpDirectory = cwd;
+        
+        sei.nShow = SW_NORMAL;
+
+        result = (ShellExecuteExW(&sei) != FALSE);
+    }
+
+    return result;
 }
 
 UIString::UIString(UINT id, int param)

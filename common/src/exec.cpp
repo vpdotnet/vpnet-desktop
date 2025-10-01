@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Private Internet Access, Inc.
+// Copyright (c) 2025 Private Internet Access, Inc.
 //
 // This file is part of the Private Internet Access Desktop Client.
 //
@@ -84,6 +84,19 @@ std::ostream &operator<<(std::ostream &os, const CmdTrace &trace)
     return os;
 }
 
+// TODO: Rather than inheriting the full environment, we should eventually restrict it to just PATH
+// with only the standard system directories (e.g. /usr/bin:/sbin). For now, we remove
+// LD_LIBRARY_PATH to prevent tools like `resolvectl` (on Ubuntu 25+) from loading our
+// app's libcrypto instead of the system one, which can cause version mismatches and crashes.
+static QProcessEnvironment cleanEnv()
+{
+    // grab everything from the system...
+    auto env = QProcessEnvironment::systemEnvironment();
+    // ...then strip out LD_LIBRARY_PATH so it won't be inherited:
+    env.remove("LD_LIBRARY_PATH");
+    return env;
+}
+
 int Executor::cmdImpl(const QString &program, const QStringList &args,
                       void(*traceFunc)(std::ostream &, const QString&, const QStringList&),
                       const QProcessEnvironment &env, QString *pOut,
@@ -93,8 +106,18 @@ int Executor::cmdImpl(const QString &program, const QStringList &args,
 
     QProcess p;
 
-    // Set the process environment (if provided)
-    if(!env.isEmpty()) p.setProcessEnvironment(env);
+      // Set the process environment (if provided)
+    if(!env.isEmpty())
+    {
+        p.setProcessEnvironment(env);
+    }
+    else
+    {
+        // If no environment is provided, we use the current environment
+        // (which is the default for QProcess)
+        p.setProcessEnvironment(cleanEnv());
+    }
+
     p.start(program, args, QProcess::ReadOnly);
     p.closeWriteChannel();
     int exitCode = waitForExitCode(p);

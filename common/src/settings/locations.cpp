@@ -48,24 +48,8 @@ bool Server::hasPort(Service service, quint16 port) const
 
 kapps::regions::Ports Server::servicePorts(Service service) const
 {
-    switch(service)
-    {
-        default:
-        {
-            Q_ASSERT(false);
-            return {};
-        }
-        case Service::OpenVpnTcp:
-            return openVpnTcpPorts();
-        case Service::OpenVpnUdp:
-            return openVpnUdpPorts();
-        case Service::WireGuard:
-            return wireGuardPorts();
-        case Service::Shadowsocks:
-            return shadowsocksPorts();
-        case Service::Meta:
-            return metaPorts();
-    }
+    // Use the impl's servicePorts() method which properly handles port overrides
+    return _pImpl->servicePorts(static_cast<kapps::regions::Service>(service));
 }
 
 quint16 Server::defaultServicePort(Service service) const

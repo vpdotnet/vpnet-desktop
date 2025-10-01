@@ -563,11 +563,11 @@ void PosixDaemon::writePlatformDiagnostics(DiagnosticsFile &file)
     file.writeCommand("PF (NAT anchors)", "pfctl", QStringList{QStringLiteral("-sn")});
     file.writeCommand("PF (App NAT anchors)", "pfctl", QStringList{QStringLiteral("-sn"), QStringLiteral("-a"), QStringLiteral(BRAND_IDENTIFIER "/*")});
     file.writeCommand("PF (000.stubDNS)", "pfctl", QStringList{QStringLiteral("-sn"), QStringLiteral("-a"), QStringLiteral(BRAND_IDENTIFIER "/000.stubDNS")});
-    file.writeCommand("dig (dig www.pia.com)", "dig", QStringList{QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("dig (dig vp.net)", "dig", QStringList{QStringLiteral("vp.net"),
         QStringLiteral("+time=4"), QStringLiteral("+tries=1")});
-    file.writeCommand("dig (dig @piadns www.pia.com)", "dig", QStringList{QStringLiteral("@%1").arg(piaModernDnsVpn()), QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("dig (dig @piadns vp.net)", "dig", QStringList{QStringLiteral("@%1").arg(piaModernDnsVpn()), QStringLiteral("vp.net"),
         QStringLiteral("+time=4"), QStringLiteral("+tries=1")});
-    file.writeCommand("ping (ping www.pia.com)", "ping", QStringList{QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("ping (ping vp.net)", "ping", QStringList{QStringLiteral("vp.net"),
         QStringLiteral("-c1"), QStringLiteral("-W1")});
     file.writeCommand("ping (ping piadns)", "ping", QStringList{piaModernDnsVpn(),
         QStringLiteral("-c1"), QStringLiteral("-W1"), QStringLiteral("-n")});
@@ -617,11 +617,11 @@ void PosixDaemon::writePlatformDiagnostics(DiagnosticsFile &file)
 
     // iptables version - 1.6.1 is required for the split tunnel feature
     file.writeCommand("iptables --version", "iptables", QStringList{QStringLiteral("--version")});
-    file.writeCommand("dig (dig www.pia.com)", "dig", QStringList{QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("dig (dig vp.net)", "dig", QStringList{QStringLiteral("vp.net"),
         QStringLiteral("+time=4"), QStringLiteral("+tries=1")});
-    file.writeCommand("dig (dig @piadns www.pia.com)", "dig", QStringList{QStringLiteral("@%1").arg(piaModernDnsVpn()), QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("dig (dig @piadns vp.net)", "dig", QStringList{QStringLiteral("@%1").arg(piaModernDnsVpn()), QStringLiteral("vp.net"),
         QStringLiteral("+time=4"), QStringLiteral("+tries=1")});
-    file.writeCommand("ping (ping www.pia.com)", "ping", QStringList{QStringLiteral("www.privateinternetaccess.com"),
+    file.writeCommand("ping (ping vp.net)", "ping", QStringList{QStringLiteral("vp.net"),
         QStringLiteral("-c1"), QStringLiteral("-W1")});
     file.writeCommand("ping (ping piadns)", "ping", QStringList{piaModernDnsVpn(),
         QStringLiteral("-c1"), QStringLiteral("-W1"), QStringLiteral("-n")});

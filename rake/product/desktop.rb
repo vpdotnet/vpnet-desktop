@@ -126,6 +126,7 @@ module PiaDesktop
 
         if(Build.windows?)
             daemon
+                .sourceFile("brands/#{Build::Brand}/brand_daemon.rc")
                 .useQt('Xml')
                 .linkArgs(["/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"])
         elsif(Build.macos?)

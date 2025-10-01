@@ -251,6 +251,11 @@ auto RegionList::readJsonRegionServers(const nlohmann::json &jsonRegion,
             if(itFqdn != jsonServer.end())
                 fqdn = itFqdn->get<std::string>();
             
+            // Port is optional; if present, specifies the port for all services
+            std::uint16_t port = 0;
+            auto itPort = jsonServer.find("port");
+            if(itPort != jsonServer.end())
+                port = itPort->get<std::uint16_t>();
                 
             auto group = jsonServer.at("service_config").get<core::StringSlice>();
 
@@ -267,7 +272,7 @@ auto RegionList::readJsonRegionServers(const nlohmann::json &jsonRegion,
             else if(itGroup->second && itGroup->second->hasAnyService())
             {
                 servers.push_back(std::make_shared<Server>(ip, std::move(cn),
-                    std::move(fqdn), itGroup->second));
+                    std::move(fqdn), itGroup->second, port));
             }
         }
         catch(const std::exception &ex)
@@ -428,6 +433,11 @@ auto RegionList::readPiav6JsonRegionServers(const nlohmann::json &jsonRegion,
                 //   - false indicates that the server requires pia-signal-settings
                 //   - true or absent indicates that the servers supports NCP
                 
+                // Port is optional; if present, specifies the port for all services
+                std::uint16_t port = 0;
+                auto itPort = jsonServer.find("port");
+                if(itPort != jsonServer.end())
+                    port = itPort->get<std::uint16_t>();
 
                 bool ncp{true};
                 auto itVanProperty = jsonServer.find("van");
@@ -448,7 +458,7 @@ auto RegionList::readPiav6JsonRegionServers(const nlohmann::json &jsonRegion,
                 else if(itGroup->second && itGroup->second->hasAnyService())
                 {
                     servers.push_back(std::make_shared<Server>(ip, std::move(cn),
-                        std::string{}, itGroup->second));
+                        std::string{}, itGroup->second, port));
                 }
             }
             catch(const std::exception &ex)
@@ -544,7 +554,7 @@ void RegionList::buildManualRegions(const core::ArraySlice<const ManualRegion> &
             }
             else
             {
-                servers.push_back(std::make_unique<Server>(manual.address,
+                servers.push_back(std::make_shared<Server>(manual.address,
                     manual.commonName.to_string(), manual.fqdn.to_string(),
                     itServiceGroup->second));
             }
@@ -571,7 +581,7 @@ void RegionList::buildManualRegions(const core::ArraySlice<const ManualRegion> &
                         pServer->metaPorts().to_vector());
                     servers.push_back(std::make_shared<Server>(pServer->address(),
                         pServer->commonName().to_string(), pServer->fqdn().to_string(),
-                        pMetaGroup));
+                        pMetaGroup, pServer->port()));
                 }
             }
         }

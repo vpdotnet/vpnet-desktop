@@ -442,10 +442,6 @@ bool OpenVPNMethod::writeOpenVPNConfig(QFile& outFile,
     QString remoteServer = sanitize(vpnServer.ip());
     out << "remote " << remoteServer << ' ' << transport.port() << endl;
 
-    if (vpnServer.commonName().isEmpty())
-        return false;
-    out << "verify-x509-name " << sanitize(vpnServer.commonName()) << " name" << endl;
-
     // OpenVPN's default setting is 'ping-restart 120'.  This means it takes up
     // to 2 minutes to notice loss of connection.  (On some OSes/systems it may
     // notice a change in local network connectivity more quickly, but this is

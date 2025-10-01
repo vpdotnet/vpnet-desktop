@@ -42,6 +42,16 @@ bool Server::hasService(Service service) const
 
 Ports Server::servicePorts(Service service) const
 {
+    // If this server has a specific port, return it as a single-element array
+    if(_port != 0)
+    {
+        // We need to store the port in a vector so we can return an ArraySlice
+        // The vector is mutable so this const method can update it
+        _portVec = {_port};
+        return _portVec;
+    }
+    
+    // Otherwise, return the ports from the service group
     switch(service)
     {
         case Service::OpenVpnTcp:

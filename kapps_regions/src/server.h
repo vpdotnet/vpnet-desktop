@@ -32,9 +32,11 @@ class KAPPS_REGIONS_EXPORT Server : public core::RetainSharedFromThis<Server>
 {
 public:
     Server(core::Ipv4Address address, std::string commonName, std::string fqdn,
-           std::shared_ptr<ServiceGroup> pServiceGroup)
+           std::shared_ptr<ServiceGroup> pServiceGroup,
+           std::uint16_t port = 0)
         : _address{address}, _commonName{std::move(commonName)},
-          _fqdn{std::move(fqdn)}, _pServiceGroup{std::move(pServiceGroup)}
+          _fqdn{std::move(fqdn)}, _pServiceGroup{std::move(pServiceGroup)},
+          _port{port}
     {
         assert(_pServiceGroup); // Ensured by caller
     }
@@ -69,11 +71,17 @@ public:
     bool hasMeta() const {return !metaPorts().empty();}
     Ports metaPorts() const {return _pServiceGroup->metaPorts();}
 
+    // Get the port for this server (0 if none specified)
+    std::uint16_t port() const {return _port;}
+
 private:
     core::Ipv4Address _address;
     std::string _commonName;
     std::string _fqdn;
     std::shared_ptr<ServiceGroup> _pServiceGroup;
+    std::uint16_t _port;
+    // Storage for the port vector when needed
+    mutable std::vector<std::uint16_t> _portVec;
 };
 
 }

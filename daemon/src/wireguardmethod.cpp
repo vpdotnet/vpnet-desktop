@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Private Internet Access, Inc.
+// Copyright (c) 2025 Private Internet Access, Inc.
 //
 // This file is part of the Private Internet Access Desktop Client.
 //
@@ -319,6 +319,14 @@ bool WireguardMethod::setupPosixDNS(const QString &deviceName, const QStringList
 {
     // Note: we reuse the openvpn updown script here
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    // Strip out the LD_LIBRARY_PATH which would otherwise be set to our 'lib' folder.
+    // We do this because:
+    // (1) We don't need the updown script to use our libraries, and
+    // (2) It actually prevents 'resolvectl' from working correctly on some Ubuntu versions (i.e Ubuntu 25)
+    // since resolvectl looks up our libcrypto which isn't the version it needs/expects and so it breaks.
+    // This was never an issue before because resolvectl seemed to clear out LD_LIBRARY_PATH before running, but not anymore.
+    env.remove("LD_LIBRARY_PATH");
 
 #ifdef Q_OS_MACOS
     // kill_pid of 0 instructs helper not to kill wireguard-go when network changes

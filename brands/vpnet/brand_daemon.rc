@@ -1,0 +1,34 @@
+#include <winver.h>
+#include "version_win.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION VPNET_WIN_VERSION
+PRODUCTVERSION VPNET_WIN_VERSION
+FILEFLAGSMASK 0
+FILEFLAGS 0
+FILEOS VOS__WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"    // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "VP.NET LLC"
+            VALUE "FileDescription",  "VP.NET Service"
+            VALUE "FileVersion",      VPNET_WIN_VERSION_STR
+            VALUE "InternalName",     "vpnet-service.exe"
+            VALUE "LegalCopyright",   ""
+            VALUE "LegalTrademarks1", ""
+            VALUE "LegalTrademarks2", ""
+            VALUE "OriginalFilename", "vpnet-service.exe"
+            VALUE "ProductName",      "VP.NET"
+            VALUE "ProductVersion",   VPNET_WIN_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409,1200    // US English, Unicode
+    END
+END
