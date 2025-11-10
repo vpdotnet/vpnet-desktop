@@ -1,5 +1,15 @@
 # Changelog
 
+### v3.7.4
+* Fix client IP detection when connected via IPv6
+* Fix DNS restoration on macOS Tahoe (26.0.1+) after VPN disconnect
+* Fix Windows installer launching client with elevated privileges
+* Fix Verified Privacy display for vanilla server connections
+* Fix connection widget displaying hardcoded port instead of actual server port
+* Add support for vanilla regions with standard TLS verification
+* Updated configuration key name on MacOS
+* Update icon set and improve SVG formatting consistency
+
 ### v3.7.3
 * Fix WireGuard connections using incorrect port for authentication when server specifies custom port
 * Fix Ubuntu 25+ compatibility by resolving LD_LIBRARY_PATH conflicts

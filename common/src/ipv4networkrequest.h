@@ -33,10 +33,12 @@ signals:
 private slots:
     void handleHostLookup(const QHostInfo &hostInfo);
     void handleNetworkReply(QNetworkReply *reply);
+    void handleSslErrors(QNetworkReply *reply, const QList<QSslError> &errors);
 
 private:
     QNetworkAccessManager *manager;
     QUrl originalUrl;
+    QList<QSslError> _sslErrors;
 };
 
 // Register our class for Q_DECLARE_METATYPE

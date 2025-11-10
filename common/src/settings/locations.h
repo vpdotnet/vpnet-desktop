@@ -174,6 +174,9 @@ public:
     // available for manual selection, etc.
     bool autoSafe() const {return _pImpl->autoSafe();}
 
+    // The region's technology type ("sgx" or "vanilla")
+    QString tech() const {return qs::toQString(_pImpl->tech());}
+
     // Latency is recorded for the whole region.  Eventually we may start
     // measuring individual servers in the nearest regions.
     nullable_t<double> latency() const {return _latency;}

@@ -214,13 +214,19 @@ void RegionList::readJsonRegions(const nlohmann::json &jsonRegions,
             auto portForward = jsonRegion.at("port_forward").get<bool>();
             auto geo = jsonRegion.at("geo").get<bool>();
 
+            // Read tech property (optional, defaults to "sgx" for backward compatibility)
+            std::string tech = "sgx";
+            auto itTech = jsonRegion.find("tech");
+            if(itTech != jsonRegion.end())
+                tech = itTech->get<std::string>();
+
             auto servers = readJsonRegionServers(jsonRegion, id, groups);
             // Add Shadowsocks if the region isn't offline
             if(!servers.empty())
                 addShadowsocksServer(id, servers, shadowsocksServers);
 
             auto pRegion = std::make_shared<Region>(id.to_string(), autoRegion, portForward,
-                    geo, std::move(servers));
+                    geo, std::move(servers), tech);
             _regionsById.emplace(pRegion->id(), std::move(pRegion));
         }
         catch(const std::exception &ex)
@@ -377,6 +383,12 @@ void RegionList::readPiav6JsonRegions(const nlohmann::json &jsonRegions,
             // * 'dns' is not used.
             auto offline = jsonRegion.at("offline").get<bool>();
 
+            // Read tech property (optional, defaults to "sgx" for backward compatibility)
+            std::string tech = "sgx";
+            auto itTech = jsonRegion.find("tech");
+            if(itTech != jsonRegion.end())
+                tech = itTech->get<std::string>();
+
             std::vector<std::shared_ptr<const Server>> servers;
             // v6 has an explicit 'offline' flag for each region.  v7 just
             // indicates offline regions by providing no servers.  The 'offline'
@@ -389,7 +401,7 @@ void RegionList::readPiav6JsonRegions(const nlohmann::json &jsonRegions,
                 addShadowsocksServer(id, servers, shadowsocksServers);
 
             auto pRegion = std::make_shared<Region>(id.to_string(), autoRegion,
-                    portForward, geo, std::move(servers));
+                    portForward, geo, std::move(servers), tech);
             _regionsById.emplace(pRegion->id(), std::move(pRegion));
         }
         catch(const std::exception &ex)

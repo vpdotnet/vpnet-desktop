@@ -264,7 +264,7 @@ void Environment::loadApiBases()
 
     loadApiBase(overridePresent, apiOverride, _pIpAddrApi, QStringLiteral("ip_api"),
                 QStringLiteral("IP API"), {
-                    QStringLiteral("https://vp.net/_rest/Network/VPN:ip?resource=")
+                    QStringLiteral("https://serverlist.vp.net")
                 });
     loadApiBase(overridePresent, apiOverride, _pIpProxyApi, QStringLiteral("ip_proxy_api"),
                 QStringLiteral("IP proxy API"), {

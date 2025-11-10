@@ -27,9 +27,11 @@ class KAPPS_REGIONS_EXPORT Region : public core::RetainSharedFromThis<Region>
 public:
     Region() = default;
     Region(std::string id, bool autoSafe, bool /*unused*/, bool geoLocated,
-           std::vector<std::shared_ptr<const Server>> servers)
-        : _id{std::move(id)}, _autoSafe{autoSafe}, 
-          _geoLocated{geoLocated}, _servers{std::move(servers)}
+           std::vector<std::shared_ptr<const Server>> servers,
+           std::string tech = "sgx")
+        : _id{std::move(id)}, _autoSafe{autoSafe},
+          _geoLocated{geoLocated}, _tech{std::move(tech)},
+          _servers{std::move(servers)}
     {
         // There are no other invariants to check - a region _could_ have zero
         // servers, which makes it "offline"
@@ -47,6 +49,7 @@ public:
         _id = std::move(other._id);
         _autoSafe = std::move(other._autoSafe);
         _geoLocated = std::move(other._geoLocated);
+        _tech = std::move(other._tech);
         _servers = std::move(other._servers);
         _serversRaw = std::move(other._serversRaw);
 
@@ -66,6 +69,7 @@ public:
     core::StringSlice id() const {return _id;}
     bool autoSafe() const {return _autoSafe;}
     bool geoLocated() const {return _geoLocated;}
+    core::StringSlice tech() const {return _tech;}
 
     bool offline() const {return _servers.empty();}
 
@@ -82,6 +86,7 @@ private:
     std::string _id;
     bool _autoSafe;
     bool _geoLocated;
+    std::string _tech;
     // Dedicated IP functionality has been removed
     std::vector<std::shared_ptr<const Server>> _servers;
     // Raw pointer array to provide an array slice to API

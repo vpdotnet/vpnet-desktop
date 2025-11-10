@@ -94,13 +94,14 @@ MovableModule {
       metricName: SettingsMessages.remotePortSetting
       iconPath: Theme.dashboard.connectionModulePortImage
       metricValue: {
-        // WireGuard always uses 1337 currently
-        if(showWireguard)
-          return "51820"
         // When connected, show the actual transport used
         if(Daemon.state.connectionState === "Connected" && Daemon.state.actualTransport)
           return Daemon.state.actualTransport.port.toString()
         // Otherwise, show the setting value
+        if(showWireguard) {
+          // WireGuard uses the default port setting
+          return SettingsMessages.defaultRemotePort
+        }
         var port = 0
         if(Daemon.settings.protocol === "udp")
           port = Daemon.settings.remotePortUDP

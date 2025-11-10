@@ -109,6 +109,13 @@ QJsonObject scutilGet(const QString& path, bool* present = nullptr)
     QJsonValue value = scutilParse(data);
     if (present)
         *present = value.isObject();
+
+    // Log parsing failures with the path for debugging (especially on macOS Tahoe 26.x)
+    if(value.isUndefined())
+        qWarning() << "Failed to parse scutil output for path:" << path;
+    else if(value.isNull())
+        qInfo() << "Got 'No such key' for path:" << path;
+
     return value.toObject();
 }
 
@@ -117,6 +124,43 @@ bool scutilExists(const QString& path)
     bool exists;
     QJsonObject data = scutilGet(path, &exists);
     return exists && !data.contains(QStringLiteral("PIAEmpty"));
+}
+
+// TODO: Remove after May 2026
+// Fallback helper to read from old PrivateInternetAccess keys if VPNet keys are missing.
+// This provides backward compatibility for systems that may still have old configuration
+// from before the PrivateInternetAccess → VPNet rename.
+QJsonObject scutilGetWithFallback(const QString& vpnetPath, bool* present = nullptr)
+{
+    bool exists = false;
+    QJsonObject data = scutilGet(vpnetPath, &exists);
+
+    // If VPNet key exists and has data, use it
+    if(exists && !data.isEmpty())
+    {
+        if(present)
+            *present = true;
+        return data;
+    }
+
+    // Fallback: try old PrivateInternetAccess path
+    QString fallbackPath = QString(vpnetPath).replace(QStringLiteral("VPNet"), QStringLiteral("PrivateInternetAccess"));
+    if(fallbackPath != vpnetPath)
+    {
+        qInfo() << "VPNet key not found, trying fallback path:" << fallbackPath;
+        data = scutilGet(fallbackPath, &exists);
+        if(exists && !data.isEmpty())
+        {
+            qInfo() << "Found data in fallback PrivateInternetAccess key";
+            if(present)
+                *present = true;
+            return data;
+        }
+    }
+
+    if(present)
+        *present = false;
+    return QJsonObject();
 }
 
 QStringList arrayToStringList(const QJsonArray& array)
@@ -153,7 +197,7 @@ void saveAndApplyConfiguration(int killPid, QStringList dnsServers, QString doma
         QStringLiteral("d.add dnsServers * %1").arg(dnsServers.join(' ')),
         QStringLiteral("d.add domain %1").arg(domain),
         QStringLiteral("d.add winsServers * %1").arg(winsServers.join(' ')),
-        QStringLiteral("set State:/Network/PrivateInternetAccess/SetupParams")
+        QStringLiteral("set State:/Network/VPNet/SetupParams")
     });
 
     QString primaryService{detectPrimaryService()};
@@ -206,25 +250,25 @@ void applyConfiguration(const QString &primaryService, int killPid, QStringList 
     commands << QStringLiteral("d.add Addresses * %1").arg(originalAddresses.join(' '));
     if (overrideDNS)
         commands << QStringLiteral("d.add OverrideDNS ? TRUE");
-    commands << QStringLiteral("set State:/Network/PrivateInternetAccess");
+    commands << QStringLiteral("set State:/Network/VPNet");
 
     // Save a backup of the DNS state
     commands << QStringLiteral("d.init");
     commands << QStringLiteral("d.add PIAEmpty ? TRUE");
     commands << QStringLiteral("get State:/Network/Service/%1/DNS").arg(primaryService);
-    commands << QStringLiteral("set State:/Network/PrivateInternetAccess/OldStateDNS");
+    commands << QStringLiteral("set State:/Network/VPNet/OldStateDNS");
 
     // Save a backup of the DNS setup
     commands << QStringLiteral("d.init");
     commands << QStringLiteral("d.add PIAEmpty ? TRUE");
     commands << QStringLiteral("get Setup:/Network/Service/%1/DNS").arg(primaryService);
-    commands << QStringLiteral("set State:/Network/PrivateInternetAccess/OldSetupDNS");
+    commands << QStringLiteral("set State:/Network/VPNet/OldSetupDNS");
 
     // Save a backup of the SMB state
     commands << QStringLiteral("d.init");
     commands << QStringLiteral("d.add PIAEmpty ? TRUE");
     commands << QStringLiteral("get State:/Network/Service/%1/SMB").arg(primaryService);
-    commands << QStringLiteral("set State:/Network/PrivateInternetAccess/OldStateSMB");
+    commands << QStringLiteral("set State:/Network/VPNet/OldStateSMB");
 
     // Overwrite the DNS state/setup
     if(overrideDNS)
@@ -238,7 +282,7 @@ void applyConfiguration(const QString &primaryService, int killPid, QStringList 
             commands << QStringLiteral("d.add ServerAddresses * %1").arg(dnsServers.join(' '));
         commands << QStringLiteral("set State:/Network/Service/%1/DNS").arg(primaryService);
         commands << QStringLiteral("set Setup:/Network/Service/%1/DNS").arg(primaryService);
-        commands << QStringLiteral("set State:/Network/PrivateInternetAccess/DNS");
+        commands << QStringLiteral("set State:/Network/VPNet/DNS");
     }
 
     // Overwrite SMB state
@@ -278,14 +322,16 @@ void applyConfiguration(const QString &primaryService, int killPid, QStringList 
 
 void restoreConfiguration()
 {
-    QJsonObject config = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess"));
+    // TODO: Remove fallback after May 2026
+    QJsonObject config = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet"));
 
     QString service = config.value(QLatin1String("Service")).toString();
 
     QStringList commands;
     commands << QStringLiteral("open");
 
-    QJsonObject intendedDNS = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess/DNS"));
+    // TODO: Remove fallback after May 2026
+    QJsonObject intendedDNS = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet/DNS"));
 
     auto restoreConfigKey = [&commands, &intendedDNS](const QString& savedKey, const QString& destKey)
     {
@@ -302,10 +348,23 @@ void restoreConfiguration()
         // set to the configuration applied by PIA
         if(destExists && destValue == intendedDNS)
         {
-            // If we backed up a value (and it's not PIAEmpty), restore it.
-            if (scutilExists(savedKey))
+            // TODO: Remove fallback after May 2026
+            // Check for backup in VPNet key first, then try old PrivateInternetAccess key
+            QString actualSavedKey = savedKey;
+            if(!scutilExists(savedKey))
             {
-                commands << QStringLiteral("get %1").arg(savedKey);
+                QString fallbackKey = QString(savedKey).replace(QStringLiteral("VPNet"), QStringLiteral("PrivateInternetAccess"));
+                if(scutilExists(fallbackKey))
+                {
+                    qInfo() << "Using fallback PrivateInternetAccess backup key:" << fallbackKey;
+                    actualSavedKey = fallbackKey;
+                }
+            }
+
+            // If we backed up a value (and it's not PIAEmpty), restore it.
+            if (scutilExists(actualSavedKey))
+            {
+                commands << QStringLiteral("get %1").arg(actualSavedKey);
                 commands << QStringLiteral("set %1").arg(destKey);
             }
             // Otherwise, our backup was empty, just remove the key to restore
@@ -315,14 +374,20 @@ void restoreConfiguration()
                 commands << QStringLiteral("remove %1").arg(destKey);
             }
         }
-        // Remove the backup key, even if we decided not to restore it.
+        // Remove the backup keys (both VPNet and old PrivateInternetAccess), even if we decided not to restore
         commands << QStringLiteral("remove %1").arg(savedKey);
+        QString fallbackKey = QString(savedKey).replace(QStringLiteral("VPNet"), QStringLiteral("PrivateInternetAccess"));
+        if(fallbackKey != savedKey)
+            commands << QStringLiteral("remove %1").arg(fallbackKey);  // TODO: Remove after May 2026
     };
 
-    restoreConfigKey(QStringLiteral("State:/Network/PrivateInternetAccess/OldStateDNS"), QStringLiteral("State:/Network/Service/%1/DNS").arg(service));
-    restoreConfigKey(QStringLiteral("State:/Network/PrivateInternetAccess/OldSetupDNS"), QStringLiteral("Setup:/Network/Service/%1/DNS").arg(service));
-    restoreConfigKey(QStringLiteral("State:/Network/PrivateInternetAccess/OldStateSMB"), QStringLiteral("State:/Network/Service/%1/SMB").arg(service));
+    restoreConfigKey(QStringLiteral("State:/Network/VPNet/OldStateDNS"), QStringLiteral("State:/Network/Service/%1/DNS").arg(service));
+    restoreConfigKey(QStringLiteral("State:/Network/VPNet/OldSetupDNS"), QStringLiteral("Setup:/Network/Service/%1/DNS").arg(service));
+    restoreConfigKey(QStringLiteral("State:/Network/VPNet/OldStateSMB"), QStringLiteral("State:/Network/Service/%1/SMB").arg(service));
 
+    commands << QStringLiteral("remove State:/Network/VPNet/DNS");
+    commands << QStringLiteral("remove State:/Network/VPNet");
+    // TODO: Remove after May 2026 - cleanup old PrivateInternetAccess keys
     commands << QStringLiteral("remove State:/Network/PrivateInternetAccess/DNS");
     commands << QStringLiteral("remove State:/Network/PrivateInternetAccess");
 
@@ -339,7 +404,8 @@ void restoreConfiguration()
 void configurationChanged()
 {
     bool present;
-    QJsonObject setupParams = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess/SetupParams"), &present);
+    // TODO: Remove fallback after May 2026
+    QJsonObject setupParams = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet/SetupParams"), &present);
 
     if(!present)
     {
@@ -361,7 +427,8 @@ void configurationChanged()
 
     uint killPid = setupParams.value(QLatin1String("killPid")).toString().toUInt();
 
-    QJsonObject data = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess"));
+    // TODO: Remove fallback after May 2026
+    QJsonObject data = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet"));
 
     QString oldPrimary = data.value(QLatin1String("Service")).toString();
     QStringList originalAddresses = arrayToStringList(data.value(QLatin1String("Addresses")).toArray());
@@ -416,9 +483,10 @@ void configurationChanged()
         return;
     }
 
-    QJsonObject oldStateDNS = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess/OldStateDNS"));
-    QJsonObject oldSetupDNS = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess/OldSetupDNS"));
-    QJsonObject intendedDNS = scutilGet(QStringLiteral("State:/Network/PrivateInternetAccess/DNS"));
+    // TODO: Remove fallback after May 2026
+    QJsonObject oldStateDNS = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet/OldStateDNS"));
+    QJsonObject oldSetupDNS = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet/OldSetupDNS"));
+    QJsonObject intendedDNS = scutilGetWithFallback(QStringLiteral("State:/Network/VPNet/DNS"));
     QJsonObject currentStateDNS = scutilGet(QStringLiteral("State:/Network/Service/%1/DNS").arg(currentPrimary));
     QJsonObject currentSetupDNS = scutilGet(QStringLiteral("Setup:/Network/Service/%1/DNS").arg(currentPrimary));
 
@@ -437,7 +505,7 @@ void configurationChanged()
             qInfo() << "current setup DNS:" << QJsonDocument{currentSetupDNS}.toJson();
             scutil({
                        QStringLiteral("open"),
-                       QStringLiteral("get State:/Network/PrivateInternetAccess/DNS"),
+                       QStringLiteral("get State:/Network/VPNet/DNS"),
                        QStringLiteral("set State:/Network/Service/%1/DNS").arg(currentPrimary),
                        QStringLiteral("set Setup:/Network/Service/%1/DNS").arg(currentPrimary),
                        QStringLiteral("quit"),
@@ -542,7 +610,8 @@ int main(int argc, char* argv[])
         {
             // Remove the saved setup parameters
             scutil({
-                QStringLiteral("remove State:/Network/PrivateInternetAccess/SetupParams"),
+                QStringLiteral("remove State:/Network/VPNet/SetupParams"),
+                QStringLiteral("remove State:/Network/PrivateInternetAccess/SetupParams"),  // TODO: Remove after May 2026
             }, ProcessErrorBehavior::IgnoreErrors);
             restoreConfiguration();
         }

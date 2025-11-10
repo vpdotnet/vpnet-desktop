@@ -161,6 +161,11 @@ Async<QByteArray> NetworkTaskWithRetry::sendRequest()
     ApiResource requestResource{nextBase.uri + _resource};
     QUrl requestUri{requestResource};
     QNetworkRequest request(requestUri);
+
+    // Disable HTTP/2 due to Qt's HTTP/2 implementation not working correctly in this context
+    // Force HTTP/1.1 for all API requests to avoid 403 errors
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+
     if (!_authHeaderVal.isEmpty())
         setAuth(request, _authHeaderVal);
 

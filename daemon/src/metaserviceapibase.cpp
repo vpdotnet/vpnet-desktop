@@ -51,7 +51,7 @@ ApiBaseSequence MetaServiceApiBase::beginAttempt()
     auto appendFixedBases = [&]
     {
         for(const auto &fixedBase : _fixedBaseUris)
-            bases.push_back({fixedBase, nullptr, {}});
+            bases.push_back({fixedBase, nullptr, {}, {}});
     };
 
     // If we're connected check which infra we're using
@@ -62,7 +62,7 @@ ApiBaseSequence MetaServiceApiBase::beginAttempt()
             // Use a fixed address for the internal meta sevice available in
             // the modern infrastructure.  This is provided by the VPN server,
             // so use the VPN cert's common name for verification, but rely on system CAs
-            bases.push_back({QString("https://10.0.0.1:443") + _dynamicBasePath, nullptr, _state.connectedServer()->commonName()});
+            bases.push_back({QString("https://10.0.0.1:443") + _dynamicBasePath, nullptr, _state.connectedServer()->commonName(), {}});
             // Fallback addresses
             appendFixedBases();
 
@@ -127,7 +127,7 @@ ApiBaseSequence MetaServiceApiBase::beginAttempt()
                 .arg(_dynamicBasePath);
             // Still use the server's common name for verification, but rely on system CAs
             // instead of a custom CA certificate
-            bases.push_back({uri, nullptr, pBaseServer->commonName()});
+            bases.push_back({uri, nullptr, pBaseServer->commonName(), {}});
         }
     };
 

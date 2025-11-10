@@ -110,22 +110,21 @@ Item {
         text: {
           if (isConnecting) {
             return uiTr("Verifying...")
-          } else if (isConnected) {
-            // Always show "Verified Privacy™" when connected with WireGuard
-            // even if we don't have MRENCLAVE yet
+          } else if (isConnected && hasMrEnclave) {
+            // Only show "Verified Privacy™" when connected with SGX (has MRENCLAVE)
             return uiTr("Verified Privacy™")
           }
           return ""
         }
-        
+
         color: isConnecting ? Theme.dashboard.textDisabledColor : Theme.dashboard.textColor
         font.pixelSize: 14
         visible: text !== ""
       }
       
-      // Green checkmark icon when verified
+      // Green checkmark icon when verified with SGX
       Image {
-        visible: isConnected
+        visible: isConnected && hasMrEnclave
         source: Theme.imagePath + "/changelog/checkmark-valid.png"
         width: 16
         height: 16

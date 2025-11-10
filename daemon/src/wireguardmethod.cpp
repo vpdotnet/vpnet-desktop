@@ -1401,15 +1401,35 @@ void WireguardMethod::run(const ConnectionConfig &connectingConfig,
     }
     // Don't do DNS resolution while connecting - specify the IP address in the
     // request, and use the host name to verify the certificate.
-    
-    // For SGX verification, we'll use a custom TLS validation callback
-    qInfo() << "Setting up SGX verification for WireGuard server" << certCommonName;
-    
-    // Store the MR_ENCLAVE value that we'll extract during validation
+
+    // Check if this is a vanilla region (no SGX verification needed)
+    auto pLocation = connectingConfig.vpnLocation();
+    QString regionTech = "sgx";  // Default to SGX for backward compatibility
+    if(pLocation)
+    {
+        regionTech = pLocation->tech();
+        qInfo() << "Region tech type:" << regionTech;
+    }
+
+    // Store the MR_ENCLAVE value that we'll extract during validation (for SGX regions)
     auto capturedMrEnclave = std::make_shared<QString>();
-    
-    // Create a TLS validation callback that will verify the SGX certificate
-    auto tlsValidationCallback = [this, vpnServer, capturedMrEnclave](const QList<QSslCertificate> &certChain, const QString &peerName) -> bool {
+
+    // Create the TLS validation callback based on region tech
+    std::function<bool(const QList<QSslCertificate> &, const QString &)> tlsValidationCallback;
+
+    if(regionTech == "vanilla")
+    {
+        // For vanilla regions, use normal TLS verification (no custom callback)
+        qInfo() << "Using vanilla TLS verification for WireGuard server" << certCommonName;
+        // We don't set tlsValidationCallback, which means FixedApiBase will use normal TLS verification
+    }
+    else
+    {
+        // For SGX regions, use custom SGX verification
+        qInfo() << "Setting up SGX verification for WireGuard server" << certCommonName;
+
+        // Create a TLS validation callback that will verify the SGX certificate
+        tlsValidationCallback = [this, vpnServer, capturedMrEnclave](const QList<QSslCertificate> &certChain, const QString &peerName) -> bool {
         if (certChain.isEmpty()) {
             qWarning() << "No certificates in chain for SGX verification";
             return false;
@@ -1461,11 +1481,14 @@ void WireguardMethod::run(const ConnectionConfig &connectingConfig,
         
         // Store the mr_enclave for display to user
         *capturedMrEnclave = mrEnclave;
-        
+
         return true;
-    };
-    
-    // Create the FixedApiBase with the TLS validation callback
+        };
+    }
+
+    // Create the FixedApiBase with the appropriate TLS validation
+    // For vanilla regions, pass an empty callback (which means use normal TLS)
+    // For SGX regions, pass the custom SGX verification callback
     FixedApiBase hostAuthBase(authHost, nullptr, certCommonName, tlsValidationCallback);
 
     _pAuthRequest = g_daemon->apiClient().getRetry(hostAuthBase, resource, authHeader)

@@ -300,6 +300,10 @@ QJsonValue Parser::dictionary()
 
 void Parser::dictionaryElements(QJsonObject &dict)
 {
+    // Check for empty dictionary - macOS Tahoe (26.x) may produce empty dictionaries
+    if(_lookahead.type == TokenType::BlockClose)
+        return;
+
     dictionaryElement(dict);
     while(_lookahead.type == TokenType::NewLine)
     {
@@ -332,8 +336,9 @@ QString Parser::dictionaryKey()
 {
     if(_lookahead.type == TokenType::Identifier)
     {
-        // Restrict keys to alphabetic characters
-        QRegularExpression regex("^[A-Za-z]+$");
+        // Accept keys with letters, numbers, and underscores
+        // macOS Tahoe (26.x) uses keys like __CONFIGURATION_ID__, __FLAGS__, etc.
+        QRegularExpression regex("^[A-Za-z_][A-Za-z0-9_]*$");
 
         // Check if the lookahead text matches the regular expression
         QRegularExpressionMatch result = regex.match(_lookahead.text);
@@ -381,6 +386,10 @@ QJsonValue Parser::array()
 
 void Parser::arrayElements(QJsonArray &array)
 {
+    // Check for empty array - macOS Tahoe (26.x) may produce empty arrays
+    if(_lookahead.type == TokenType::BlockClose)
+        return;
+
     arrayElement(array);
     while(_lookahead.type == TokenType::NewLine)
     {
@@ -452,7 +461,7 @@ QJsonValue Parser::parse()
         }
         else if(_lookahead.type == TokenType::NoKeyError)
         {
-            qInfo() << "Got a key error, returning null";
+            qInfo() << "scutil returned 'No such key' (key does not exist in system configuration)";
             return QJsonValue::Null;
         }
         else

@@ -87,7 +87,7 @@ namespace
     const QString modernRegionMetaResource{QStringLiteral("vpninfo/regions/v2")};
 
     // Resource paths for IP Address
-    const QString ipLookupResource{QStringLiteral("api/client/status")};
+    const QString ipLookupResource{QStringLiteral("clientinfo/ip/v1")};
     
     // Resource path for enclave list
     const QString enclaveListResource{QStringLiteral("vpninfo/enclaves/v1")};
@@ -525,23 +525,25 @@ Daemon::Daemon(QObject* parent)
             [this](){Daemon::setOverrideFailed(QStringLiteral("enclave list"));});
             
     // Connect IPv4NetworkRequest signals
-    connect(_ipv4Request, &IPv4NetworkRequest::finished, this, 
+    connect(_ipv4Request, &IPv4NetworkRequest::finished, this,
             [this](QNetworkReply *reply) {
                 QByteArray data = reply->readAll();
                 QJsonParseError parseError;
                 QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
-                
+
                 if (parseError.error == QJsonParseError::NoError && !doc.isNull()) {
-                    if(doc[QStringLiteral("connected")].isBool() && 
-                       !doc[QStringLiteral("connected")].toBool(true)) {
-                        QString ip = doc["ip"].toString();
-                        if (!ip.isEmpty()) {
-                            qDebug() << "Loaded public IPv4 address:" << ip;
-                            _state.externalIp(ip);
-                        }
+                    // API format: {"ip":"...", "connected": true/false/null}
+                    QString ip = doc["ip"].toString();
+                    if (!ip.isEmpty()) {
+                        qDebug() << "Loaded public IPv4 address:" << ip;
+                        _state.externalIp(ip);
+                    } else {
+                        qWarning() << "IPv4 IP response missing 'ip' field";
                     }
+                } else {
+                    qWarning() << "Failed to parse IPv4 IP response:" << parseError.errorString();
                 }
-                
+
                 reply->deleteLater();
             });
             
@@ -1925,7 +1927,7 @@ public:
     VpnIpProbeTask(ApiClient &apiClient, Environment &environment)
     {
         _pPiaApiTask = apiClient.getVpnIpRetry(*environment.getIpAddrApi(),
-                                               QStringLiteral("api/client/status"),
+                                               QStringLiteral("clientinfo/ip/v1"),
                                                std::chrono::seconds{10})
             ->then(this, [this](const QJsonDocument &json)
             {
@@ -1968,7 +1970,7 @@ public:
             ->then(this, [this, &apiClient, &environment]()
             {
                 return apiClient.getVpnIpRetry(*environment.getIpProxyApi(),
-                                               QStringLiteral("api/client/status"),
+                                               QStringLiteral("clientinfo/ip/v1"),
                                                std::chrono::seconds{6});
             })
             ->next(this, [this](const Error &err, const QJsonDocument &)
@@ -2070,7 +2072,7 @@ Async<void> Daemon::loadVpnIp()
             if(result.address.isEmpty())
             {
                 return _apiClient.getVpnIpRetry(*_environment.getIpAddrApi(),
-                                                QStringLiteral("api/client/status"),
+                                                QStringLiteral("clientinfo/ip/v1"),
                                                 std::chrono::minutes{2})
                     ->then(this, [this](const QJsonDocument &json)
                     {
@@ -2122,6 +2124,15 @@ void Daemon::vpnStateChanged(VPNConnection::State state,
 
     queueNotification(&Daemon::reapplyFirewallRules);
 
+    // Clear MRENCLAVE when starting a new connection
+    if(state == VPNConnection::State::Connecting)
+    {
+        if (!_state.connectedMrEnclave().isEmpty()) {
+            qInfo() << "Clearing connectedMrEnclave on new connection";
+            _state.connectedMrEnclave(QString{});
+        }
+    }
+
     // Latency measurements only make sense when we're not connected to the VPN
     if(state == VPNConnection::State::Disconnected && isActive())
     {
@@ -2130,7 +2141,7 @@ void Daemon::vpnStateChanged(VPNConnection::State state,
             qInfo() << "Clearing connectedMrEnclave on disconnect";
             _state.connectedMrEnclave(QString{});
         }
-        
+
         if(_settings.enableBackgroundLatencyChecks())
             _modernLatencyTracker.start();
 
@@ -2468,23 +2479,20 @@ void Daemon::modernRegionsMetaLoaded(const QJsonDocument &modernRegionsMetaJsonD
 void Daemon::fetchIPv4ExternalIp()
 {
     qDebug() << "Fetching external IP using IPv4-only request";
-    
+
     // Check if we have a valid IPv4 request handler
     if (!_ipv4Request) {
         qWarning() << "IPv4NetworkRequest handler is null";
         return;
     }
-    
-    // Get the base URL from environment
-    QString baseUrl = environment().getIpAddrApi()->beginAttempt().getNextUri().uri;
-    
-    // Add the resource path to the URL
-    QUrl url(baseUrl + QStringLiteral("api/client/status"));
+
+    // Hardcoded URL for serverlist API
+    QUrl url(QStringLiteral("https://serverlist.vp.net/clientinfo/ip/v1"));
     if (!url.isValid()) {
         qWarning() << "Invalid URL for IPv4 IP lookup:" << url.toString();
         return;
     }
-    
+
     // Make the IPv4-only request
     _ipv4Request->get(url);
 }
@@ -2837,6 +2845,7 @@ void Daemon::reapplyFirewallRules()
     {
 #if defined(Q_OS_UNIX)
         // Use tunnel interface name on Linux/MacOS, i.e "tun2"
+        Q_UNUSED(pMethod);
         params.tunnelDeviceName = _state.tunnelDeviceName().toStdString();
 #elif defined(Q_OS_WIN)
         // Use luid (stored as a string) on Windows
