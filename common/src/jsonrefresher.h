@@ -127,6 +127,15 @@ public:
         _resource = resource;
     }
 
+    // Set the public key (PEM) used to verify the signature appended to the
+    // response.  If this is empty, responses are not verified.  Takes effect on
+    // the next fetch; use this instead of startOrOverride() when the resource
+    // has no override/bundled/cached data to load.
+    void setSignatureKey(const QByteArray &signatureKey)
+    {
+        _signatureKey = signatureKey;
+    }
+
 signals:
     // Emitted any time the content of the resource is successfully loaded.
     void contentLoaded(const QJsonDocument &content);

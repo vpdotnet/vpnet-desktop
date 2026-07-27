@@ -28,6 +28,7 @@
 #include "apiclient.h"
 #include <common/src/jsonrefresher.h>
 #include <QObject>
+#include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QFile>
@@ -58,32 +59,39 @@ public:
 };
 
 // Object representing an update available from an update channel - a version
-// string and download URI.
+// string, download URI, and the hash of the installer at that URI.
 //
-// Always has both or neither part set (can never be partially valid), but the
-// version string is not necessarily valid at this point.
+// Always has all of these parts set or none of them (can never be partially
+// valid), but the version string is not necessarily valid at this point.
 class Update
 {
 public:
     // By default, empty URI and version
     Update() = default;
-    // Construct Update with the URI and version.  If either is empty, both
-    // strings are left empty in the resulting object (there is never a
-    // partially-valid Update).
-    Update(const QString &uri, const QString &version, const QString &osRequired);
+    // Construct Update with the URI, version, and installer hash.  If any of
+    // these is empty, all strings are left empty in the resulting object (there
+    // is never a partially-valid Update).
+    //
+    // An update with no hash can't be verified once it's downloaded, so it is
+    // not a valid update - it's never offered.
+    Update(const QString &uri, const QString &version, const QString &osRequired,
+           const QString &sha256);
 
 public:
-    // A valid Update has a non-empty URI and version.
+    // A valid Update has a non-empty URI, version, and hash.
     bool isValid() const {return !_uri.isEmpty();}
     const QString &uri() const {return _uri;}
     const QString &version() const {return _version;}
     const QString &osRequired() const {return _osRequired;}
+    // Expected SHA-256 of the installer at uri(), as lowercase hex.  Always set
+    // if the Update is valid.
+    const QString &sha256() const {return _sha256;}
 
     bool operator==(const Update &other) const;
     bool operator!=(const Update &other) const {return !(*this == other);}
 
 private:
-    QString _uri, _version, _osRequired;
+    QString _uri, _version, _osRequired, _sha256;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Update &update)
@@ -116,6 +124,10 @@ private:
     // Check the version metadata from JsonRefresher and update the available
     // URI/version.  (Doesn't emit updateChanged().)
     void checkVersionMetadata(const QJsonDocument &metadataDoc);
+
+    // The resource to fetch for the current update channel - the channel name,
+    // plus a request for the signed variant if a signing key is applied.
+    QString metadataResource() const;
 
 public:
     // Start or stop refreshing the version metadata.
@@ -152,6 +164,14 @@ public:
     void setUpdateChannel(const QString &updateChannel, bool newRunning,
                           const std::shared_ptr<ApiBase> &pUpdateApi);
 
+    // Set the public key used to verify the signature on the version metadata.
+    // If this is set, the channel requests the signed variant of the metadata
+    // resource, and metadata that isn't correctly signed is discarded.
+    //
+    // This is normally applied before setting the update channel, but it can be
+    // applied at any time; it takes effect on the next fetch.
+    void setSignatureKey(const QByteArray &signatureKey);
+
     // Get the current update available from this channel.
     // No update is available if the channel is not running, the channel didn't
     // return any data, or if the channel is running but hasn't successfully
@@ -176,6 +196,12 @@ private:
     // current daemon version).
     Update _update;
     std::vector<QString> _flags;
+    // Public key used to verify the version metadata signature (PEM).  Empty if
+    // no key has been applied, which disables signature verification.
+    QByteArray _signatureKey;
+    // The update channel name currently set (without the query parameters added
+    // to build the metadata resource).
+    QString _updateChannel;
 };
 
 // UpdateDownloader tracks what updates are available and manages requests
@@ -235,6 +261,11 @@ public:
 
     // Refresh available updates (if running)
     void refreshUpdate();
+
+    // Set the public key used to verify the version metadata signature on both
+    // channels.  Apply this before setting the update channels so the first
+    // fetch is verified.
+    void setSignatureKey(const QByteArray &signatureKey);
 
     // Set the current update channels
     void setGaUpdateChannel(const QString &channel, const std::shared_ptr<ApiBase> &pUpdateApi);
@@ -313,6 +344,14 @@ private:
     // download, and the available version changes.  Set when _pDownloadReply is
     // set.
     QString _downloadingVersion;
+    // The expected SHA-256 of the file being downloaded (lowercase hex), from
+    // the update metadata.  Set when _pDownloadReply is set; empty if the
+    // metadata didn't advertise a hash for this update.
+    QString _downloadingSha256;
+    // Hashes the installer as it is received, so the result can be compared to
+    // _downloadingSha256 when the download completes.  Reset when a download
+    // starts.
+    QCryptographicHash _downloadHash{QCryptographicHash::Sha256};
     // When a download is in progress, the file we are writing to.  This holds
     // an open file when _pDownloadReply is set, it is closed otherwise.
     QFile _installerFile;

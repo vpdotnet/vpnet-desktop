@@ -134,9 +134,15 @@ public:
     JsonField(QString, gaChannelVersion, {})
     JsonField(QString, gaChannelVersionUri, {})
     JsonField(QString, gaChannelOsRequired, {})
+    // Expected SHA-256 of the installer at the version URI (lowercase hex).
+    // Empty only in a cache written by a daemon that predates this field; the
+    // restored update is then discarded (an update that can't be verified is
+    // never offered) until the channel refreshes.
+    JsonField(QString, gaChannelVersionSha256, {})
     JsonField(QString, betaChannelVersion, {})
     JsonField(QString, betaChannelVersionUri, {})
     JsonField(QString, betaChannelOsRequired, {})
+    JsonField(QString, betaChannelVersionSha256, {})
 
 #if defined(Q_OS_WINDOWS)
     // Original service command for the Dnscache service on Windows.  PIA must

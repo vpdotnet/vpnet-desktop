@@ -41,21 +41,31 @@ namespace TestData {
 const QString &gaChannel = QStringLiteral("release");
 const QString &betaChannel = QStringLiteral("beta");
 
+// Installer hashes for the test updates.  These aren't the hashes of any real
+// content; they're only compared to the values parsed from the metadata.  An
+// update is only valid if it has one, so every test update needs a hash.
+const QString &hash100 = QStringLiteral("1000000000000000000000000000000000000000000000000000000000000000");
+const QString &hash080 = QStringLiteral("0800000000000000000000000000000000000000000000000000000000000000");
+const QString &hashCurrent = QStringLiteral("cc00000000000000000000000000000000000000000000000000000000000000");
+const QString &hash101b = QStringLiteral("101b000000000000000000000000000000000000000000000000000000000000");
+const QString &hash102b = QStringLiteral("102b000000000000000000000000000000000000000000000000000000000000");
+const QString &hash099b = QStringLiteral("099b000000000000000000000000000000000000000000000000000000000000");
+
 // Newer release
 // The UpdateDownloader uses the actual version even in unit tests, so the
 // 'newer' version is set really high.
-const Update newerGa{QStringLiteral("https://unit.test/v100"), QStringLiteral("100.0.0"), {}};
+const Update newerGa{QStringLiteral("https://unit.test/v100"), QStringLiteral("100.0.0"), {}, hash100};
 // Older release
-const Update olderGa{QStringLiteral("https://unit.test/v080"), QStringLiteral("0.8.0"), {}};
+const Update olderGa{QStringLiteral("https://unit.test/v080"), QStringLiteral("0.8.0"), {}, hash080};
 // The same release.
 // (The version here could actually have pre-release tags depending on the
 // version being built.)
-const Update sameGa{QStringLiteral("https://unit.test/vCurrent"), QString::fromStdString(Version::semanticVersion()), {}};
+const Update sameGa{QStringLiteral("https://unit.test/vCurrent"), QString::fromStdString(Version::semanticVersion()), {}, hashCurrent};
 
 // The newer/older betas are relative to the "newer" GA release.
-const Update newerBeta{QStringLiteral("https://unit.test/v101b"), QStringLiteral("101.0.0-beta.3"), {}};
-const Update newerBeta2{QStringLiteral("https://unit.test/v102b"), QStringLiteral("102.0.0-beta.2"), {}};
-const Update olderBeta{QStringLiteral("https://unit.test/v99b"), QStringLiteral("99.0.0-beta.7"), {}};
+const Update newerBeta{QStringLiteral("https://unit.test/v101b"), QStringLiteral("101.0.0-beta.3"), {}, hash101b};
+const Update newerBeta2{QStringLiteral("https://unit.test/v102b"), QStringLiteral("102.0.0-beta.2"), {}, hash102b};
+const Update olderBeta{QStringLiteral("https://unit.test/v99b"), QStringLiteral("99.0.0-beta.7"), {}, hash099b};
 
 // Payload for no build at all on a channel.
 // (Just an empty 'latest_version_piax' object.)
@@ -71,17 +81,31 @@ bool buildIsBeta = false;
 // Build the update payload JSON from an Update object.
 // The platform name, update version, and update URI are assumed not to contain
 // characters that would have to be escaped in JSON; no escaping is performed.
-QByteArray buildUpdatePayload(const Update &update)
+QByteArray buildUpdatePayload(const QString &version, const QString &uri,
+                              const QString &sha256)
 {
+    // Metadata that predates the installer hash has no "hash" object at all.
+    QString hashProperty;
+    if(!sha256.isEmpty())
+    {
+        hashProperty = R"(,
+            "hash": {"sha256": ")" + sha256 + R"("})";
+    }
+
     return (R"(
 {
     ")" + QStringLiteral(BRAND_UPDATE_JSON_KEY_NAME) + R"(": {
         ")" + UpdateChannel::platformName + R"(": {
-            "version": ")" + update.version() + R"(",
-            "download": ")" + update.uri() + R"("
+            "version": ")" + version + R"(",
+            "download": ")" + uri + R"(")" + hashProperty + R"(
         }
     }
 })").toUtf8();
+}
+
+QByteArray buildUpdatePayload(const Update &update)
+{
+    return buildUpdatePayload(update.version(), update.uri(), update.sha256());
 }
 
 // Enqueue an update payload reply
@@ -108,7 +132,8 @@ char *toString(const Update &update)
     // rely on the caller to delete[] it.  QTest::toString() does this when
     // given a QString.
     return QTest::toString(QStringLiteral("Update: ") + update.version() +
-        QStringLiteral(" - ") + update.uri());
+        QStringLiteral(" - ") + update.uri() +
+        QStringLiteral(" - ") + update.sha256());
 }
 
 // Test fixture - contains an UpdateDownloader with both release channel names
@@ -187,6 +212,46 @@ private slots:
         QCOMPARE(fixture._updateSpy[0][3].value<Update>(), Update{});
         // No feature flags
         QCOMPARE(fixture._updateSpy[0][4].value<std::vector<QString>>(), std::vector<QString>{});
+    }
+
+    // The installer hash advertised in the metadata is carried on the Update
+    // (it's used to verify the installer once it has been downloaded).
+    void testGaHash()
+    {
+        DownloaderFixture fixture;
+        QSignalSpy consumeSpy{&MockNetworkManager::_replyConsumed, &ReplyConsumedSignal::signal};
+
+        auto pGaReply = enqueueUpdateReply(TestData::newerGa);
+        fixture.run(true);
+        QVERIFY(consumeSpy.wait(100));
+        QVERIFY(!MockNetworkManager::hasNextReply());
+
+        pGaReply->queueFinished();
+        QVERIFY(fixture._updateSpy.wait());
+        // Update's comparison covers the hash, but compare it directly too so a
+        // failure points at the hash specifically.
+        QCOMPARE(fixture._updateSpy[0][0].value<Update>().sha256(),
+                 TestData::newerGa.sha256());
+    }
+
+    // A newer release with no installer hash can't be verified once it's
+    // downloaded, so it isn't offered at all.
+    void testGaMissingHash()
+    {
+        DownloaderFixture fixture;
+        QSignalSpy consumeSpy{&MockNetworkManager::_replyConsumed, &ReplyConsumedSignal::signal};
+
+        // The same release as testGaNewer, but with no hash in the metadata.
+        auto pGaReply = MockNetworkManager::enqueueReply(
+            buildUpdatePayload(TestData::newerGa.version(), TestData::newerGa.uri(), {}));
+        fixture.run(true);
+        QVERIFY(consumeSpy.wait(100));
+        QVERIFY(!MockNetworkManager::hasNextReply());
+
+        pGaReply->queueFinished();
+        // No update is found, so nothing changes and no signal is emitted (the
+        // same as a channel with no build for this platform).
+        QVERIFY(!fixture._updateSpy.wait(1000));
     }
 
     // An older release in GA should be offered as a downgrade only if the

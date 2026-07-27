@@ -587,6 +587,9 @@ Daemon::Daemon(QObject* parent)
                                               _environment.getRegionsListPublicKey(),
                                               QJsonDocument{_data.cachedEnclaveList()});
         updatePublicIpRefresher(_connection->state());
+        // Re-apply the metadata signing key; reloading the environment may have
+        // applied or removed a key override.
+        _updateDownloader.setSignatureKey(_environment.getRegionsListPublicKey());
         _updateDownloader.run(true, _environment.getUpdateApi());
 
         _memTraceTimer.start();
@@ -687,13 +690,18 @@ Daemon::Daemon(QObject* parent)
             &Daemon::onUpdateDownloadFinished);
     connect(&_updateDownloader, &UpdateDownloader::downloadFailed, this,
             &Daemon::onUpdateDownloadFailed);
+    // The version metadata is signed with the same key as the regions list;
+    // apply it before setting the channels so the first fetch is verified.
+    _updateDownloader.setSignatureKey(_environment.getRegionsListPublicKey());
     _updateDownloader.setGaUpdateChannel(_settings.updateChannel(), _environment.getUpdateApi());
     _updateDownloader.setBetaUpdateChannel(_settings.betaUpdateChannel(), _environment.getUpdateApi());
     _updateDownloader.enableBetaChannel(_settings.offerBetaUpdates(), _environment.getUpdateApi());
     _updateDownloader.reloadAvailableUpdates(Update{_data.gaChannelVersionUri(), _data.gaChannelVersion(),
-                                                    _data.gaChannelOsRequired()},
+                                                    _data.gaChannelOsRequired(),
+                                                    _data.gaChannelVersionSha256()},
                                              Update{_data.betaChannelVersionUri(), _data.betaChannelVersion(),
-                                                    _data.betaChannelOsRequired()},
+                                                    _data.betaChannelOsRequired(),
+                                                    _data.betaChannelVersionSha256()},
                                              _data.flags());
 
     if(!dataFileRead)
@@ -3230,10 +3238,12 @@ void Daemon::onUpdateRefreshed(const Update &availableUpdate,
     _data.gaChannelVersion(gaUpdate.version());
     _data.gaChannelVersionUri(gaUpdate.uri());
     _data.gaChannelOsRequired(gaUpdate.osRequired());
+    _data.gaChannelVersionSha256(gaUpdate.sha256());
     _data.flags(flags);
     _data.betaChannelVersion(betaUpdate.version());
     _data.betaChannelVersionUri(betaUpdate.uri());
     _data.betaChannelOsRequired(betaUpdate.osRequired());
+    _data.betaChannelVersionSha256(betaUpdate.sha256());
 
     // Only set osUnsupported if no updates are available.  It's possible, for
     // example, that there might be a supported GA update available, and also a
