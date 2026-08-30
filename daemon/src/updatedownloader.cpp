@@ -89,20 +89,22 @@ namespace
     }
 }
 
-Update::Update(const QString &uri, const QString &version, const QString &osRequired)
+Update::Update(const QString &uri, const QString &version,
+               const QString &osRequired, const QString &sha256)
 {
-    if(!uri.isEmpty() && !version.isEmpty())
+    if(!uri.isEmpty() && !version.isEmpty() && !sha256.isEmpty())
     {
         _uri = uri;
         _version = version;
         _osRequired = osRequired;
+        _sha256 = sha256.toLower();
     }
 }
 
 bool Update::operator==(const Update &other) const
 {
     return uri() == other.uri() && version() == other.version() &&
-        osRequired() == other.osRequired();
+        osRequired() == other.osRequired() && sha256() == other.sha256();
 }
 
 UpdateChannel::UpdateChannel()
@@ -154,6 +156,11 @@ void UpdateChannel::checkVersionMetadata(const QJsonDocument &regionsDoc)
     const QString &latestVersion = platformObj[QStringLiteral("version")].toString();
     const QString &downloadUrl = platformObj[QStringLiteral("download")].toString();
     const QString &osVersionRequirement = platformObj[QStringLiteral("required")].toString();
+    // The expected hash of the installer, used to verify the download.  Only
+    // SHA-256 is understood; other digests that might be advertised alongside
+    // it are ignored.
+    const QString &sha256 = platformObj[QStringLiteral("hash")].toObject()
+        [QStringLiteral("sha256")].toString().toLower();
 
     // If something is missing from the server data, log a warning just for
     // diagnostic purposes.
@@ -163,13 +170,22 @@ void UpdateChannel::checkVersionMetadata(const QJsonDocument &regionsDoc)
             << platformName << "- version:" << latestVersion << "- url:"
             << downloadUrl;
     }
+    // Without a hash the installer can't be verified, so the update can't be
+    // offered at all - Update discards the incomplete data below.
+    else if(sha256.isEmpty())
+    {
+        qError() << "No SHA-256 in latest-version info for platform"
+            << platformName << "version" << latestVersion
+            << "- this update can't be verified and will not be offered";
+    }
 
     // Store the update.  (Update ignores partial data if the server returned
-    // only a URI or version somehow.)
-    _update = Update{downloadUrl, latestVersion, osVersionRequirement};
-    
+    // only some of the URI, version, or hash somehow.)
+    _update = Update{downloadUrl, latestVersion, osVersionRequirement, sha256};
+
     qInfo() << "UpdateChannel: Received update from API - version:" << latestVersion
-            << "url:" << downloadUrl << "osRequired:" << osVersionRequirement;
+            << "url:" << downloadUrl << "osRequired:" << osVersionRequirement
+            << "sha256:" << sha256;
 }
 
 void UpdateChannel::run(bool newRunning, const std::shared_ptr<ApiBase> &pUpdateApi)
@@ -223,11 +239,41 @@ void UpdateChannel::refreshUpdate()
     // Otherwise, there is no effect, no update channel is set.
 }
 
+QString UpdateChannel::metadataResource() const
+{
+    // The update API base URI ends with the 'resource' query parameter, so the
+    // channel name is the resource.  When a signing key is applied, ask for the
+    // signed variant of the metadata - the JSON on a single line, followed by a
+    // blank line and the base64 signature (the same format as the regions
+    // list).
+    if(_signatureKey.isEmpty())
+        return _updateChannel;
+    return _updateChannel + QStringLiteral("&signed=1");
+}
+
+void UpdateChannel::setSignatureKey(const QByteArray &signatureKey)
+{
+    if(_signatureKey == signatureKey)
+        return;
+
+    _signatureKey = signatureKey;
+
+    // Apply the key to the current refresher, if there is one.  The resource
+    // changes too, since signed and unsigned metadata are separate variants.
+    if(_pMetadataRefresher)
+    {
+        _pMetadataRefresher->setSignatureKey(_signatureKey);
+        _pMetadataRefresher->setResource(metadataResource());
+    }
+}
+
 void UpdateChannel::setUpdateChannel(const QString &updateChannel, bool newRunning,
                                      const std::shared_ptr<ApiBase> &pUpdateApi)
 {
     _pMetadataRefresher.reset();
     qInfo() << "Switching to update channel" << updateChannel;
+
+    _updateChannel = updateChannel;
 
     // Remove any update that's being advertised until we fetch the new channel.
     // (We might never fetch any new data if the update channel was cleared, or
@@ -248,9 +294,10 @@ void UpdateChannel::setUpdateChannel(const QString &updateChannel, bool newRunni
         // - it switches to the short polling interval until a load for the new
         //   URI succeeds
         _pMetadataRefresher.reset(new JsonRefresher{QStringLiteral("version data"),
-                                                    updateChannel,
+                                                    metadataResource(),
                                                     versionInitialInterval,
                                                     versionRefreshInterval});
+        _pMetadataRefresher->setSignatureKey(_signatureKey);
         connect(_pMetadataRefresher.get(), &JsonRefresher::contentLoaded, this,
                 &UpdateChannel::onVersionMetadataReady);
     }
@@ -469,6 +516,12 @@ void UpdateDownloader::setBetaUpdateChannel(const QString &channel,
     _betaChannel.setUpdateChannel(channel, _running && _enableBeta, pUpdateApi);
 }
 
+void UpdateDownloader::setSignatureKey(const QByteArray &signatureKey)
+{
+    _gaChannel.setSignatureKey(signatureKey);
+    _betaChannel.setSignatureKey(signatureKey);
+}
+
 void UpdateDownloader::enableBetaChannel(bool enable, const std::shared_ptr<ApiBase> &pUpdateApi)
 {
     if(_enableBeta == enable)
@@ -561,6 +614,13 @@ Async<DownloadResult> UpdateDownloader::downloadUpdate()
     _pDownloadReply->setParent(this);
     _pDownloadTask = Async<DownloadResult>::create();
     _downloadingVersion = availableUpdate.version();
+    // Hash the installer as it's received so it can be checked against the
+    // hash from the (signed) update metadata when the download completes.
+    // A valid update always has a hash, so there is always something to check
+    // against here.
+    Q_ASSERT(!availableUpdate.sha256().isEmpty());
+    _downloadingSha256 = availableUpdate.sha256();
+    _downloadHash.reset();
 
     // The download will timeout if not even 1 byte can be downloaded
     // with the error "HostNotFoundError"
@@ -631,7 +691,9 @@ void UpdateDownloader::onDownloadReadyRead()
     // Write the new data to the file.
     // QIODevice doesn't provide any way to observe the new data without copying
     // it, so we make a copy here just to write it and throw the copy away.
-    if(_installerFile.write(_pDownloadReply->readAll()) < 0)
+    const QByteArray &newData = _pDownloadReply->readAll();
+    _downloadHash.addData(newData);
+    if(_installerFile.write(newData) < 0)
     {
         // The write failed, cancel the download by aborting the network
         // request.  This will cause onDownloadFinished() to be called with an
@@ -658,6 +720,23 @@ void UpdateDownloader::onDownloadFinished()
     // Class invariant - set when _pDownloadReply is set
     Q_ASSERT(!_downloadingVersion.isEmpty());
 
+    // Flush any data that's still buffered in the reply.  readyRead() normally
+    // delivers everything, but anything left has to be written before the file
+    // is closed, otherwise the installer would be truncated (and would fail the
+    // hash check below).
+    bool writeFailed = false;
+    const QByteArray &remainingData = _pDownloadReply->readAll();
+    if(!remainingData.isEmpty())
+    {
+        _downloadHash.addData(remainingData);
+        if(_installerFile.write(remainingData) < 0)
+        {
+            qError() << "Failed to write to installer file"
+                << _installerFile.fileName() << "-" << _installerFile.error();
+            writeFailed = true;
+        }
+    }
+
     // Delete the reply when we're done here
     _pDownloadReply->deleteLater();
     _installerFile.close();
@@ -670,6 +749,9 @@ void UpdateDownloader::onDownloadFinished()
     _pDownloadTask.swap(pFinishedTask);
     QString finishedVersion;
     _downloadingVersion.swap(finishedVersion);
+    QString expectedSha256;
+    _downloadingSha256.swap(expectedSha256);
+    const QString &actualSha256 = QString::fromLatin1(_downloadHash.result().toHex());
 
     // Check if the download failed
     DownloadResult taskResult;
@@ -692,9 +774,39 @@ void UpdateDownloader::onDownloadFinished()
         // otherwise.
         taskResult.failed(dueToError);
     }
+    else if(writeFailed)
+    {
+        // The installer on disk is incomplete - don't offer it even though the
+        // download itself succeeded.
+        qError() << "Installer download of" << finishedVersion
+            << "could not be written to" << _installerFile.fileName();
+        // Delete the partial file - failure is ignored
+        _installerFile.remove();
+        _downloadTimedOut = false;
+        emit downloadFailed(finishedVersion, true);
+        taskResult.failed(true);
+    }
+    else if(actualSha256 != expectedSha256)
+    {
+        // The installer doesn't match the hash from the update metadata (which
+        // is signed) - it was corrupted or tampered with in transit.  Don't
+        // offer it to the client; treat this as a download error.
+        // This also covers an update with no hash at all, which should never
+        // reach this point (an update with no hash isn't valid).
+        qError() << "Installer download of" << finishedVersion << "from"
+            << pFinishedReply->url() << "has hash" << actualSha256
+            << "- expected" << expectedSha256;
+        // Delete the bad file - failure is ignored
+        _installerFile.remove();
+        _downloadTimedOut = false;
+        emit downloadFailed(finishedVersion, true);
+        taskResult.failed(true);
+    }
     else
     {
         // Otherwise, we're done, the download succeeded
+        qInfo() << "Verified installer hash for" << finishedVersion << "-"
+            << actualSha256;
 #ifdef Q_OS_LINUX
         // Add the executable bit on Linux so the client can execute the
         // downloaded installer.
